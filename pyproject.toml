@@ -1,0 +1,23 @@
+[project]
+name = "industrial-ai-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = 'DESKTOP-EGB9Q9M\82308', email = "823082231@qq.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.143.0",
+    "pydantic>=2.14.0",
+    "pydantic-settings>=2.15.0",
+    "pymodbus==3.6.9",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+industrial-ai-service = "industrial_ai_service:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"

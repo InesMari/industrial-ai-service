@@ -1,0 +1,7 @@
+from pydantic import BaseModel
+from typing import Any
+
+class APIResponse(BaseModel):
+    code: int = 0
+    msg: str = "success"
+    data: Any | None = None
