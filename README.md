@@ -12,6 +12,9 @@
 | pymodbus 3.6.9 | Modbus TCP 异步客户端与服务端（模拟器） |
 | uvicorn | ASGI 服务器 |
 | uv | 包管理与项目构建 |
+| Docker / Docker Compose | 容器化构建与一键编排（含 Modbus 模拟容器） |
+
+开发依赖（dev 组）：`pytest`、`pytest-asyncio`、`pytest-cov`、`httpx`（异步 API 测试客户端）、`ruff`（代码检查）。
 
 ## 目录结构
 
@@ -41,11 +44,13 @@ industrial-ai-service/
 │   │   └── main.py                  # 应用工厂入口：create_app()、lifespan、统一异常处理器
 │   └── industrial_ai_service/       # uv 构建的包入口（industrial-ai-service 命令）
 ├── tests/
-│   ├── conftest.py                  # pytest fixtures（规划中）
-│   └── test_sensor.py               # 传感器接口测试（规划中）
+│   ├── conftest.py                  # pytest fixtures：FakeModbusService 伪造服务 + httpx AsyncClient
+│   └── test_sensor.py               # 传感器接口测试：正常读取、参数校验、设备离线等用例
 ├── modbus_sim.py                    # 本地 Modbus TCP 模拟器（见下文）
 ├── write_register.py                # 向模拟器寄存器写入值的工具脚本（见下文）
-├── pyproject.toml                   # 项目元数据与依赖（uv）
+├── Dockerfile                       # 多阶段构建镜像：uv 构建依赖 + 非 root 用户运行
+├── docker-compose.yml               # 编排 API 服务与 Modbus 模拟容器
+├── pyproject.toml                   # 项目元数据、依赖与 pytest 配置（uv）
 ├── uv.lock                          # 依赖锁定文件
 └── .env.example                     # 环境变量模板
 ```
@@ -178,6 +183,54 @@ curl "http://localhost:8000/api/v1/sensor/temperature?line_id=line1"
 }
 ```
 
+## 运行测试
+
+测试使用 `pytest` + `httpx` 的 `ASGITransport` 直接调用 ASGI 应用，并通过依赖注入覆盖替换真实的 Modbus 服务，因此**无需启动模拟器或真实设备**。
+
+- `tests/conftest.py`：`FakeModbusService` 伪造实现（可调温度值、可强制失败），`app` fixture 中通过 `app.dependency_overrides[get_modbus_service]` 替换，`client` fixture 提供 `AsyncClient`
+- `tests/test_sensor.py`：覆盖成功读取、非法 `line_id`、缺少参数（均返回 422 `VALIDATION_ERROR`）、设备离线（503 `DEVICE_OFFLINE`）
+
+`pyproject.toml` 中已配置 `asyncio_mode = "auto"` 与 `pythonpath = ["src"]`，直接运行即可：
+
+```powershell
+uv run pytest              # 运行全部测试
+uv run pytest -v           # 显示详细用例
+uv run pytest --cov=app    # 带覆盖率报告（pytest-cov）
+```
+
+## Docker 部署
+
+### 单独构建镜像
+
+`Dockerfile` 采用多阶段构建：
+
+1. `builder` 阶段：基于 `uv` 官方镜像，按 `uv.lock` 冻结安装依赖（`--no-dev`）
+2. 运行阶段：`python:3.12-slim`，仅拷贝 `.venv` 与 `src/`
+3. 创建非 root 用户 `appuser`（uid 10001）运行，配置 `HEALTHCHECK` 探测 `/api/v1/health`，`EXPOSE 8000`
+
+```powershell
+docker build -t industrial-ai-service .
+docker run -p 8000:8000 -e MODBUS_HOST=host.docker.internal -e MODBUS_PORT=5020 industrial-ai-service
+```
+
+### docker-compose 一键启动
+
+`docker-compose.yml` 编排两个服务：
+
+| 服务 | 说明 |
+| --- | --- |
+| `api` | 由当前目录 `Dockerfile` 构建，映射 `8000:8000`，环境变量 `APP_ENV=production`、`MODBUS_HOST=modbus-sim`、`MODBUS_PORT=502`，依赖 `modbus-sim` |
+| `modbus-sim` | 使用 `oitc/modbus-server` 镜像作为 Modbus 服务端，映射 `502:502` |
+
+```powershell
+docker compose up --build
+curl "http://localhost:8000/api/v1/sensor/temperature?line_id=line1"
+```
+
+> 注意：容器内 `MODBUS_HOST=modbus-sim` 走 compose 网络、端口 502（与本地 `modbus_sim.py` 的 5020 不同）；在 Windows 上通过本地模拟器连接容器时，可用 `host.docker.internal` 并指定 5020。
+
+> 已知不一致：`pyproject.toml` 声明 `requires-python = ">=3.14"`，而 `Dockerfile` 使用 `python:3.12-slim`。实际构建前需统一 Python 版本（调整镜像标签或放宽 `requires-python`）。
+
 ## API 端点
 
 | 方法 | 路径 | 说明 |
@@ -211,5 +264,5 @@ curl "http://localhost:8000/api/v1/sensor/temperature?line_id=line1"
 
 - [ ] 设备控制接口（`src/app/api/routes/device.py`）
 - [ ] MQTT 数据发布（`src/app/services/mqtt_service.py`）
-- [ ] 单元测试（`tests/`）
-- [ ] Dockerfile 容器化部署
+- [x] 单元测试（`tests/`，含 FakeModbusService 与依赖注入覆盖）
+- [x] Docker 容器化（`Dockerfile` 多阶段构建 + `docker-compose.yml` 编排）

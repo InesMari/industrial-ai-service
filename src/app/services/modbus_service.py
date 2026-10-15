@@ -1,4 +1,6 @@
+from ast import Mod
 import logging
+from socket import timeout
 from app.core.exceptions import AppException,DeviceOfflineError
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException, ConnectionException

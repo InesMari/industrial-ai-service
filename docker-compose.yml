@@ -1,0 +1,16 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - MODBUS_HOST=modbus-sim
+      - MODBUS_PORT=502
+    depends_on:
+      - modbus-sim
+
+  modbus-sim:
+    image: oitc/modbus-server
+    ports:
+      - "502:502"
