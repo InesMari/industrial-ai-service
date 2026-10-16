@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/astral-sh/uv:python3.12-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS builder
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+# --no-install-project：本阶段只装依赖，源码在下一阶段提供，避免构建 uv_build 包
+RUN uv sync --frozen --no-dev --no-install-project
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 RUN groupadd -g 10001 appgroup && \

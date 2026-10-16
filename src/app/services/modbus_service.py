@@ -14,6 +14,7 @@ class ModbusService:
         self.slave_id = slave_id
         self.timeout = timeout
         self.client: AsyncModbusTcpClient | None = None
+        self._connected = False
 
     async def connect(self):
         """建立 Modbus TCP 连接"""
@@ -24,7 +25,8 @@ class ModbusService:
             timeout=self.timeout,
         )
         await self.client.connect()
-        if not self.client.connected:
+        self._connected = bool(self.client.connected)
+        if not self._connected:
             raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
         logger.info(f"Modbus 已连接 {self.host}:{self.port}")
 
@@ -32,6 +34,7 @@ class ModbusService:
         """断开连接"""
         if self.client and self.client.connected:
             self.client.close()
+            self._connected = False
             logger.info("Modbus 连接已关闭")
 
     async def read_temperature(self, line_id: str) -> dict :

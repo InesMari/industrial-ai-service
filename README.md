@@ -204,9 +204,23 @@ uv run pytest --cov=app    # 带覆盖率报告（pytest-cov）
 
 `Dockerfile` 采用多阶段构建：
 
-1. `builder` 阶段：基于 `uv` 官方镜像，按 `uv.lock` 冻结安装依赖（`--no-dev`）
-2. 运行阶段：`python:3.12-slim`，仅拷贝 `.venv` 与 `src/`
+1. `builder` 阶段：`ghcr.io/astral-sh/uv:python3.14-bookworm-slim`，按 `uv.lock` 冻结安装依赖
+2. 运行阶段：`python:3.14-slim`，仅拷贝 `.venv` 与 `src/`
 3. 创建非 root 用户 `appuser`（uid 10001）运行，配置 `HEALTHCHECK` 探测 `/api/v1/health`，`EXPOSE 8000`
+
+命令与参数说明：
+
+```dockerfile
+RUN uv sync --frozen --no-dev --no-install-project
+```
+
+| 参数 | 作用 |
+| --- | --- |
+| `--frozen` | 严格按 `uv.lock` 安装，与 `pyproject.toml` 不一致时报错，不重新解析依赖 |
+| `--no-dev` | 不安装 dev 依赖组（pytest、ruff 等） |
+| `--no-install-project` | 只装第三方依赖；本阶段没有 `src/`，否则 uv 构建 editable 根包时报 `Expected a Python module at: src/industrial_ai_service/__init__.py`。应用通过 `uvicorn --app-dir src` 直接导入 `app` 包运行，无需安装 |
+
+> 两个阶段必须统一使用 **Python 3.14**：`uv.lock` 已锁定 `requires-python = ">=3.14"`，使用 Python 3.12 镜像时 `uv sync` 会直接以 exit code 2 失败。
 
 ```powershell
 docker build -t industrial-ai-service .
@@ -219,17 +233,17 @@ docker run -p 8000:8000 -e MODBUS_HOST=host.docker.internal -e MODBUS_PORT=5020 
 
 | 服务 | 说明 |
 | --- | --- |
-| `api` | 由当前目录 `Dockerfile` 构建，映射 `8000:8000`，环境变量 `APP_ENV=production`、`MODBUS_HOST=modbus-sim`、`MODBUS_PORT=502`，依赖 `modbus-sim` |
-| `modbus-sim` | 使用 `oitc/modbus-server` 镜像作为 Modbus 服务端，映射 `502:502` |
+| `api` | 由当前目录 `Dockerfile` 构建，映射 `8000:8000`；环境变量 `APP_ENV=production`、`MODBUS_HOST=modbus-sim`、`MODBUS_PORT=5020`、`MODBUS_SLAVE_ID=1`；`depends_on: modbus-sim` |
+| `modbus-sim` | 使用 `oitc/modbus-server` 镜像作为 Modbus 服务端，映射 `5020:5020` |
 
 ```powershell
 docker compose up --build
 curl "http://localhost:8000/api/v1/sensor/temperature?line_id=line1"
 ```
 
-> 注意：容器内 `MODBUS_HOST=modbus-sim` 走 compose 网络、端口 502（与本地 `modbus_sim.py` 的 5020 不同）；在 Windows 上通过本地模拟器连接容器时，可用 `host.docker.internal` 并指定 5020。
+> 注意：`api` 与 `modbus-sim` 之间通过 compose 网络直连，走容器**实际监听端口**；`ports` 映射（`5020:5020`）仅用于宿主机访问。若 `oitc/modbus-server` 镜像实际监听 502，则需把 `MODBUS_PORT` 改回 502，或让该镜像监听 5020，否则 `api` 启动时会因连不上设备报 `DEVICE_OFFLINE`（503）。
 
-> 已知不一致：`pyproject.toml` 声明 `requires-python = ">=3.14"`，而 `Dockerfile` 使用 `python:3.12-slim`。实际构建前需统一 Python 版本（调整镜像标签或放宽 `requires-python`）。
+> 本地调试时，容器内访问宿主机上的 `modbus_sim.py` 可用 `host.docker.internal` + `MODBUS_PORT=5020`。
 
 ## API 端点
 
