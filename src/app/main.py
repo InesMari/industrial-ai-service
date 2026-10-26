@@ -11,19 +11,45 @@ from app.core.middleware import RequestIdMiddleware
 from app.core.exceptions import AppException
 from app.api.router import api_router
 from app.dependencies.providers import get_modbus_service
+from app.services.opcua_service import OpcUaService
+from app.services.collector import ClosedLoopCollector 
 
 settings = get_settings()
 setup_logging(settings.APP_LOG_LEVEL)
+logging.getLogger("asyncua").setLevel(logging.WARNING)  #防止日志刷屏
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("服务器启动中......")
+    # 连接 Modbus
     modbus = get_modbus_service()
     await modbus.connect()
-    logger.info("服务器启动完成")
+
+    # 创建 OPC UA 客户端
+    opcua = OpcUaService(
+        url=f"opc.tcp://{settings.OPCUA_HOST}:{settings.OPCUA_PORT}"
+            f"/freeopcua/server/",
+        ns_uri=settings.OPCUA_NS_URI,
+    )
+
+    # 创建并启动闭环采集器
+    collector = ClosedLoopCollector(
+        modbus=modbus,
+        opcua=opcua,
+        mqtt_broker=settings.MQTT_BROKER,
+        mqtt_port=settings.MQTT_PORT,
+        mqtt_prefix=settings.MQTT_TOPIC_PREFIX,
+        interval=2.0,
+    )
+    await collector.start()
+    app.state.collector = collector
+
+    logger.info("服务器启动完成")   
     yield
+
     logger.info("服务器正在关闭......")
+    await collector.stop()
     await modbus.disconnect()
     logger.info("服务器已关闭")
 

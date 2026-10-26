@@ -3,15 +3,43 @@ services:
     build: .
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     environment:
       - APP_ENV=production
+      - APP_LOG_LEVEL=INFO
       - MODBUS_HOST=modbus-sim
       - MODBUS_PORT=5020
       - MODBUS_SLAVE_ID=1
+      - OPCUA_HOST=opcua-sim
+      - OPCUA_PORT=4840
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
     depends_on:
       - modbus-sim
+      - opcua-sim
+      - mosquitto
 
   modbus-sim:
-    image: oitc/modbus-server
+    build: .
+    command: python -m app.simulators.modbus_simulator
+    environment:
+      - PYTHONPATH=/app/src
     ports:
       - "5020:5020"
+
+  opcua-sim:
+    build: .
+    command: python -m app.simulators.opcua_server
+    environment:
+      - PYTHONPATH=/app/src
+    ports:
+      - "4840:4840"
+
+  mosquitto:
+    image: eclipse-mosquitto:1.6
+    ports:
+      - "1883:1883"

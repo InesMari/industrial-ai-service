@@ -8,7 +8,9 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "asyncua>=2.1.0",
     "fastapi>=0.143.0",
+    "paho-mqtt>=2.1.0",
     "pydantic>=2.14.0",
     "pydantic-settings>=2.15.0",
     "pymodbus==3.6.9",

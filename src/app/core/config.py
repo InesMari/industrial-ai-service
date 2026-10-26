@@ -14,11 +14,18 @@ class setting(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
 
+    # Modbus 配置
     MODBUS_HOST: str = "localhost"
-    MODBUS_PORT: int = 502
+    MODBUS_PORT: int = 5020
     MODBUS_SLAVE_ID: int = 1
     MODBUS_TIMEOUT: float = 3.0
 
+    #OPC UA 配置
+    OPCUA_HOST: str = "localhost"
+    OPCUA_PORT: int = 4840
+    OPCUA_NS_URI: str = "http://my.factory.namespace"
+
+    #MQTT 配置
     MQTT_BROKER: str = "localhost"
     MQTT_PORT: int = 1883
     MQTT_TOPIC_PREFIX: str = "factory"

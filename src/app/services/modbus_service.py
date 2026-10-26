@@ -1,11 +1,13 @@
-from ast import Mod
 import logging
-from socket import timeout
 from app.core.exceptions import AppException,DeviceOfflineError
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException, ConnectionException
 
 logger = logging.getLogger(__name__)
+
+# 线圈地址布局
+ALARM_COIL = 0
+COOLING_COIL = 1
 
 class ModbusService:
     def __init__(self, host: str, port: int, slave_id: int, timeout: float = 3.0):
@@ -37,7 +39,7 @@ class ModbusService:
             self._connected = False
             logger.info("Modbus 连接已关闭")
 
-    async def read_temperature(self, line_id: str) -> dict :
+    async def read_temperature(self, line_id: str) :
         """读取温度，真实调用 Modbus 寄存器"""
         if not self.client or not self.client.connected:
             raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
@@ -71,3 +73,52 @@ class ModbusService:
             "unit": "celsius",
             "raw_value": raw_value,
         }
+
+    async def read_sensor_data(self):
+        """一次读三个寄存器：温度(100)、压力(101)、振动(102)。"""
+        if not self.client or not self.client.connected:
+            raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
+
+        try:
+            rr = await self.client.read_holding_registers(
+                address=100,
+                count=3,
+                slave=self.slave_id,
+            )
+        except ConnectionException as e:
+            logger.error(f"Modbus 连接异常: {e}")
+            raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
+        except ModbusException as e:
+            logger.error(f"Modbus 协议异常: {e}")
+            raise AppException("MODBUS_ERROR", f"Modbus 通信错误: {e}", 502)
+        if rr.isError():
+            logger.error(f"Modbus 返回错误: {rr}")
+            raise AppException("MODBUS_READ_ERROR", "读取寄存器失败", 502)
+        return {
+            "temperature": rr.registers[0] / 10.0,
+            "pressure": rr.registers[1] / 10.0,
+            "vibration": rr.registers[2] / 100.0,
+        }
+
+    async def write_coil(self, address: int, value: bool):
+        """写单个线圈。"""
+        if not self.client or not self.client.connected:
+            raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
+
+        try:
+            rr = await self.client.write_coil(address, value, slave=self.slave_id)
+        except ConnectionException as e:
+            raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
+        except ModbusException as e:
+            raise AppException("MODBUS_ERROR", f"Modbus 通信错误: {e}", 502)
+        if rr.isError():
+            raise AppException("MODBUS_WRITE_ERROR", "写线圈失败", 502)
+        logger.info(f"Modbus 写线圈: CO[{address}] = {value}")    
+
+    async def read_coils(self):
+        if not self.client or not self.client.connected:
+            raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
+        rr = await self.client.read_coils(0, count=2, slave=self.slave_id)
+        if rr.isError():
+            raise AppException("MODBUS_READ_ERROR", "读线圈失败", 502)
+        return {"alarm_light": rr.bits[0], "cooling_valve": rr.bits[1]}
