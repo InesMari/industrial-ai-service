@@ -14,6 +14,9 @@ from app.dependencies.providers import get_modbus_service
 from app.services.opcua_service import OpcUaService
 from app.services.collector import ClosedLoopCollector 
 
+from app.agents.graph import build_graph
+from langgraph.checkpoint.memory import InMemorySaver
+
 settings = get_settings()
 setup_logging(settings.APP_LOG_LEVEL)
 logging.getLogger("asyncua").setLevel(logging.WARNING)  #防止日志刷屏
@@ -27,29 +30,50 @@ async def lifespan(app: FastAPI):
     await modbus.connect()
 
     # 创建 OPC UA 客户端
-    opcua = OpcUaService(
-        url=f"opc.tcp://{settings.OPCUA_HOST}:{settings.OPCUA_PORT}"
-            f"/freeopcua/server/",
-        ns_uri=settings.OPCUA_NS_URI,
-    )
+    # opcua = OpcUaService(
+    #     url=f"opc.tcp://{settings.OPCUA_HOST}:{settings.OPCUA_PORT}"
+    #         f"/freeopcua/server/",
+    #     ns_uri=settings.OPCUA_NS_URI,
+    # )
 
-    # 创建并启动闭环采集器
-    collector = ClosedLoopCollector(
-        modbus=modbus,
-        opcua=opcua,
-        mqtt_broker=settings.MQTT_BROKER,
-        mqtt_port=settings.MQTT_PORT,
-        mqtt_prefix=settings.MQTT_TOPIC_PREFIX,
-        interval=2.0,
-    )
-    await collector.start()
-    app.state.collector = collector
+    # # 创建并启动闭环采集器
+    # collector = ClosedLoopCollector(
+    #     modbus=modbus,
+    #     opcua=opcua,
+    #     mqtt_broker=settings.MQTT_BROKER,
+    #     mqtt_port=settings.MQTT_PORT,
+    #     mqtt_prefix=settings.MQTT_TOPIC_PREFIX,
+    #     interval=2.0,
+    # )
+    # await collector.start()
+    # app.state.collector = collector
+
+    # 开发阶段：InMemorySaver，进程重启即丢失，仅用于联调
+    checkpointer = InMemorySaver()
+
+    # 生产阶段注释掉上面两行，换成下面这段：
+    # from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    # async with AsyncPostgresSaver.from_conn_string(
+    #     settings.CHECKPOINT_DB_URI
+    # ) as checkpointer:
+    #     await checkpointer.setup()
+    #     app.state.agent = build_graph(checkpointer)
+    #     logger.info("Agent 已挂载到 app.state")
+    #     yield
+    #     # 退出 async with 前需要清理 M1 资源
+    #     await collector.stop()
+    #     await modbus.disconnect()
+    #     return
+
+    # 关键：把同一个 checkpointer 注入 build_graph
+    app.state.agent = build_graph(checkpointer)
+    logger.info("Agent 已挂载到 app.state")
 
     logger.info("服务器启动完成")   
     yield
 
     logger.info("服务器正在关闭......")
-    await collector.stop()
+    # await collector.stop()
     await modbus.disconnect()
     logger.info("服务器已关闭")
 

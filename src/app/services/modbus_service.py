@@ -122,3 +122,17 @@ class ModbusService:
         if rr.isError():
             raise AppException("MODBUS_READ_ERROR", "读线圈失败", 502)
         return {"alarm_light": rr.bits[0], "cooling_valve": rr.bits[1]}
+        
+    async def read_coil(self, address: int) -> bool:
+        """读单个线圈状态，返回 True/False。"""
+        if not self.client or not self.client.connected:
+            raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
+        try:
+            rr = await self.client.read_coils(address, count=1, slave=self.slave_id)
+        except ConnectionException as e:
+            raise DeviceOfflineError(f"modbus@{self.host}:{self.port}")
+        except ModbusException as e:
+            raise AppException("MODBUS_ERROR", f"Modbus 通信错误: {e}", 502)
+        if rr.isError():
+            raise AppException("MODBUS_READ_ERROR", f"读线圈 {address} 失败", 502)
+        return rr.bits[0]
