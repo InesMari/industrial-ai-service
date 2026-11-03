@@ -1,10 +1,11 @@
 # industrial-ai-service
 
-工业 AI 数据服务 —— 基于 FastAPI 的工业设备数据采集与闭环控制后端。
+工业 AI 数据服务 —— 基于 FastAPI 的工业设备数据采集与闭环控制后端，内置基于 LangGraph 的文档评审 Agent。
 
 - **采集**：通过 Modbus TCP 读取现场设备的温度、压力、振动，并通过 OPC UA 订阅产线节点变化
 - **闭环**：后台采集器按固定周期执行「触发 → 采集 → 判定 → 输出」，超阈值时自动写线圈（报警灯 / 冷却阀）并向 MQTT 发布告警
-- **对外**：统一的 HTTP API（最新状态、历史判定记录）+ MQTT 遥测/告警主题，为上层 AI 分析与工业应用提供数据接入
+- **评审**：LangGraph 文档评审 Agent 走「检索 → 生成 → 工具调用 → 质量评估 → 人工审批」链路，实时传感数据由工具读取，高危工具（`trigger_alarm`）与最终结论均需人工授权/审批后才落地
+- **对外**：统一的 HTTP API（最新状态、历史判定记录、Agent 评审的启动/恢复/状态查询）+ MQTT 遥测/告警主题，为上层 AI 分析与工业应用提供数据接入
 - **联调**：内置 Modbus TCP 与 OPC UA 模拟器，无需真实硬件即可完整跑通链路
 
 ## 技术栈
@@ -17,6 +18,8 @@
 | pymodbus 3.6.9 | Modbus TCP 异步客户端与服务端（模拟器） |
 | asyncua | OPC UA 客户端（订阅节点变化）与服务端（模拟器） |
 | paho-mqtt | MQTT 发布：遥测 telemetry、告警 alarm、预警 warning |
+| LangChain / LangGraph | Agent 图编排（`StateGraph`、`create_agent`）、`HumanInTheLoopMiddleware` 工具级中断、checkpoint 暂停与恢复 |
+| qwen-plus（DashScope） | LLM，通过阿里云百炼的 OpenAI 兼容模式调用（`langchain-openai`） |
 | uvicorn | ASGI 服务器 |
 | uv | 包管理与项目构建 |
 | Docker / Docker Compose | 容器化构建与一键编排（API + Modbus 模拟 + OPC UA 模拟 + Mosquitto） |
@@ -29,13 +32,24 @@
 industrial-ai-service/
 ├── src/
 │   ├── app/
+│   │   ├── agents/
+│   │   │   ├── state.py             # ReviewState：评审状态字段（document_text、draft_review、quality_score…）
+│   │   │   ├── graph.py             # build_graph() 七节点 StateGraph；build_industrial_agent() 工具 Agent + 人工授权
+│   │   │   ├── nodes.py             # 节点：retrieve / generate / extract_draft / evaluate / revise / human_review
+│   │   │   ├── routing.py           # route_after_evaluate：质量分与迭代上限决定转人工还是继续修订
+│   │   │   ├── tools.py             # INDUSTRIAL_TOOLS：read_sensor_data、query_equipment_manual、trigger_alarm
+│   │   │   ├── llm.py               # LLM 初始化：qwen-plus + DashScope OpenAI 兼容端点
+│   │   │   ├── interrupt_handler.py # 中断提取（review / tool）与 resume 决策值构造
+│   │   │   ├── agent.py             # 遗留草稿路由，未被 router.py 引用，勿当作有效接口
+│   │   │   └── tests/               # 手动验证脚本：图结构、中断、工具调用与审批恢复（非 pytest 用例）
 │   │   ├── api/
 │   │   │   ├── routes/
 │   │   │   │   ├── sensor.py        # 传感器数据接口：GET /api/v1/sensor/temperature
 │   │   │   │   ├── closed_loop.py   # 闭环接口：GET /api/v1/closed-loop/status、/history
+│   │   │   │   ├── agent.py         # 评审接口：POST /agent/review、/resume，GET /agent/review/{thread_id}/status
 │   │   │   │   ├── health.py        # 健康检查：GET /api/v1/health
 │   │   │   │   └── device.py        # 设备控制接口（空文件，规划中）
-│   │   │   └── router.py            # 路由汇总，挂载 sensor / health / closed_loop
+│   │   │   └── router.py            # 路由汇总，挂载 sensor / health / closed_loop / agent
 │   │   ├── core/
 │   │   │   ├── config.py            # 配置管理：pydantic-settings 加载 .env，lru_cache 单例
 │   │   │   ├── logging.py           # 日志配置：JSON 结构化日志，附带 request_id 与异常信息
@@ -62,6 +76,7 @@ industrial-ai-service/
 │   ├── conftest.py                  # pytest fixtures：FakeModbusService 伪造服务 + httpx AsyncClient
 │   ├── test_sensor.py               # 传感器接口测试：正常读取、参数校验、设备离线等用例
 │   └── test_closed_loop.py          # 闭环测试：FakeModbus / FakeOpcUa 下的判定与线圈动作
+├── front/                           # 前端工程（Vue 3 + Vite + Element Plus，详见 front/README.md）
 ├── modbus_sim.py                    # 遗留脚本：早期 Modbus 模拟器（见下文）
 ├── write_register.py                # 遗留脚本：向模拟器寄存器写入值（见下文）
 ├── Dockerfile                       # 多阶段构建镜像：uv 构建依赖 + 非 root 用户运行
@@ -85,6 +100,7 @@ industrial-ai-service/
 2. 创建 `OpcUaService`（`opc.tcp://{OPCUA_HOST}:{OPCUA_PORT}/freeopcua/server/`）
 3. 创建 `ClosedLoopCollector` 并 `start()`，实例挂到 `app.state.collector`
 4. 降低 `asyncua` 日志级别为 WARNING，避免订阅回调刷屏
+5. 创建 `InMemorySaver()` 作为 checkpointer，`build_graph(checkpointer)` 编译后的图挂到 `app.state.agent`（开发态内存存储，进程重启即丢失；生产可换 `AsyncPostgresSaver`）
 
 关闭：`collector.stop()` → `modbus.disconnect()`
 
@@ -186,6 +202,77 @@ flowchart LR
 
 > 振动取值优先使用 OPC UA 订阅值（`ProductionLine/Vibration`），未收到订阅数据时回退为 Modbus HR[102] 的值。
 
+### 文档评审 Agent（LangGraph）
+
+`src/app/agents/` 是一个基于 LangGraph 的工业文档评审 Agent：除了调用 LLM 生成评审意见，还会调用工业工具读取实时传感数据、检索规范，并把高危动作与最终结论交回人工决策。
+
+**图结构**（`build_graph(checkpointer)` 注册七个节点）：
+
+```mermaid
+flowchart LR
+    A[retrieve 检索依据] --> B[generate 构造任务消息]
+    B --> C[industrial_agent 工具循环]
+    C --> D[extract_draft 提取草稿]
+    D --> E[evaluate 质量打分]
+    E -->|score >= 80 或迭代 >= 3 次| F[human_review 人工审批 interrupt]
+    E -->|score < 80 且迭代 < 3 次| G[revise 修订]
+    G --> E
+    F --> H[END]
+```
+
+- `industrial_agent` 由 `create_agent` + `HumanInTheLoopMiddleware` 组合而成，内部自行完成多轮工具调用，输出写入 `messages`
+- `extract_draft_node` 从 `messages` 中取最后一条 assistant 内容搬进 `draft_review`（`create_agent` 只更新 `messages`）
+- `evaluate_node` 当前用「草稿长度 > 100 → 85 分，否则 60 分」模拟打分，每次进入 `revision_count + 1`；`revise_node` 调 `llm.ainvoke` 按 `missing_info` 改写草稿
+
+**`ReviewState` 字段**（`src/app/agents/state.py`）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `messages` | 对话历史（含 tool_calls），`Annotated[list, add_messages]` |
+| `document_text` | 待评审文档原文，由 API 入口写入 |
+| `retrieved_chunks` | 检索召回的依据块（当前为模拟数据） |
+| `draft_review` | LLM 生成的评审意见草稿，`revise` 会覆盖 |
+| `quality_score` | 质量分 0~100，由 `evaluate` 写入 |
+| `missing_info` | 缺失信息点，供 `revise` 作为修订指令 |
+| `revision_count` | 已修订次数，硬上限 3（防 LLM 无限自我修正） |
+| `human_decision` | `pending` / `approved` / `rejected` |
+| `final_output` | 最终评审意见（可能被人工编辑） |
+
+**评估后路由**（`route_after_evaluate`）：
+
+| 条件 | 去向 |
+| --- | --- |
+| `quality_score >= 80` | `human_review` |
+| `revision_count >= 3` | `human_review`（断路器，强制转人工） |
+| 其余 | `revise` → 回到 `evaluate` |
+
+**工业工具**（`src/app/agents/tools.py`，`INDUSTRIAL_TOOLS`）：
+
+| 工具 | 行为 | 是否需要人工授权 |
+| --- | --- | --- |
+| `read_sensor_data(line_id)` | 复用 `get_modbus_service().read_sensor_data()` 读温度/压力/振动 | 否（`interrupt_on=False`） |
+| `query_equipment_manual(query)` | 检索设备手册、工艺规范、质检标准（当前返回占位文本，待接真实 RAG） | 否 |
+| `trigger_alarm(line_id, reason)` | 高危：写线圈 0（报警灯）与 1（冷却阀）为 `True` | 是（`interrupt_on=True`） |
+
+`generate_node` 的 prompt 内置 7 条强制规则，核心是「数值以 `read_sensor_data` 实测为准」：禁止把文档或用户描述中的数值当事实；仅当实测温度 > 35.0 °C 或振动 > 3.5 mm/s 才允许调用 `trigger_alarm`；`reason` 必须写明实际读数；读数失败时禁止报警，改为建议人工核查。
+
+**两类中断与 resume 动作**（`src/app/agents/interrupt_handler.py`）：
+
+| kind | 触发位置 | payload 特征 | resume 值 |
+| --- | --- | --- | --- |
+| `review` | `human_review_node` 中的 `interrupt()` | 含 `draft_review` / `quality_score` / `question` | `{"action": "approve"}`、`{"action": "edit", "edited_text": ...}`、`{"action": "reject"}` |
+| `tool` | `HumanInTheLoopMiddleware`（batched 模式） | 含 `action_requests` | `{"decisions": [{"type": "approve"} ...]}` 或 `{"decisions": [{"type": "reject", "message": ...}]}` |
+
+> `decisions` 的数量必须与挂起的 `action_requests` 数量一致，服务端通过 `_count_pending_tool_requests()` 从 checkpoint 统计；数量不匹配会导致 `Command(resume=...)` 恢复失败。
+
+**会话与状态约定**：
+
+- `thread_id` 由 `/agent/review` 生成（`review_` + 12 位 hex），恢复与查询必须复用同一个 `thread_id`，否则会加载到空状态
+- resume 后可能再次中断（工具循环或评审循环），响应中 `interrupted=true` 并返回新的 `interrupts`，调用方需循环渲染审批卡直至完结
+- 响应前经 `_serialize_state()` 处理：剔除 `__interrupt__`，并把 `messages` 里的 LangChain Message 转为 `{type, content}`，保证可 JSON 序列化
+- checkpointer 决定中断状态能否持久化：`lifespan` 注入 `InMemorySaver()`（进程重启即丢失），生产可换 `AsyncPostgresSaver`
+- `src/app/agents/agent.py` 是早期草稿路由，未被 `router.py` 引用，**不是有效接口**
+
 ## 本地模拟器
 
 在没有真实 PLC/传感器的环境下，使用 `src/app/simulators/` 下的两个模拟器进行联调。
@@ -260,9 +347,10 @@ OPCUA_NS_URI=http://my.factory.namespace
 MQTT_BROKER=localhost
 MQTT_PORT=1883
 MQTT_TOPIC_PREFIX=factory
+DASHSCOPE_API_KEY=sk-xxxxxxxx
 ```
 
-> `.env.example` 目前仍是早期模板：`MODBUS_PORT=502` 且未包含 `OPCUA_*`，复制后需按上面内容补齐。`MODBUS_PORT` 的**代码默认值已是 5020**（真实设备常见端口为 502，接真机时按需改回）。
+> `.env.example` 已改为 `MODBUS_PORT=5020` 并包含 `DASHSCOPE_API_KEY` 条目，但**未包含 `OPCUA_*`**，复制后需按上面内容补齐。`MODBUS_PORT` 的代码默认值为 5020（真实设备常见端口为 502，接真机时按需改回）。`DASHSCOPE_API_KEY` 需替换为你在阿里云百炼控制台申请的 Key，否则 Agent 的 LLM 调用会失败。
 
 ### 3. 启动模拟器
 
@@ -337,6 +425,42 @@ curl "http://localhost:8000/api/v1/closed-loop/status"
 curl "http://localhost:8000/api/v1/closed-loop/history?limit=20"
 ```
 
+启动一次文档评审（需要 `.env` 中已配置可用的 `DASHSCOPE_API_KEY`）：
+
+```powershell
+curl -X POST "http://localhost:8000/api/v1/agent/review" `
+  -H "Content-Type: application/json" `
+  -d '{"document_text":"本次焊接作业温度偏高，请评估是否需要报警。"}'
+```
+
+Agent 通常在工具授权或评审审批处中断，响应形如：
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "thread_id": "review_1a2b3c4d5e6f",
+    "interrupted": true,
+    "interrupts": [
+      {
+        "interrupt_id": "...",
+        "kind": "tool",
+        "payload": { "action_requests": [{ "name": "trigger_alarm", "args": {} }] }
+      }
+    ]
+  }
+}
+```
+
+按 `kind` 用同一个 `thread_id` 恢复：工具级中断传 `tool_allow` / `tool_deny`，评审审批传 `approve` / `edit` / `reject`。
+
+```powershell
+curl -X POST "http://localhost:8000/api/v1/agent/review/review_1a2b3c4d5e6f/resume" `
+  -H "Content-Type: application/json" `
+  -d '{"action":"tool_allow"}'
+```
+
 ## 运行测试
 
 测试使用 `pytest` + `httpx` 的 `ASGITransport` 直接调用 ASGI 应用，闭环用例则直接实例化 `ClosedLoopCollector` 并注入伪造服务，因此**无需启动模拟器或真实设备**。
@@ -344,6 +468,9 @@ curl "http://localhost:8000/api/v1/closed-loop/history?limit=20"
 - `tests/conftest.py`：`FakeModbusService` 伪造实现（可调温度值、可强制失败），`app` fixture 中通过 `app.dependency_overrides[get_modbus_service]` 替换，`client` fixture 提供 `AsyncClient`
 - `tests/test_sensor.py`：覆盖成功读取、非法 `line_id`、缺少参数（均返回 422 `VALIDATION_ERROR`）、设备离线（503 `DEVICE_OFFLINE`）
 - `tests/test_closed_loop.py`：`FakeModbus` + `FakeOpcUa` 下验证 `normal` / `alarm` 判定，以及报警时线圈 0、1 均被置 `True`
+- `src/app/agents/tests/`：8 个**手动验证脚本**（非 pytest 用例），覆盖图结构与 revise 循环、中断提取、approve / reject 恢复、多工具循环、只读工具不触发中断、`trigger_alarm` 中断与工具构造
+
+> 上述脚本没有 `test_*` 断言函数，每个文件自带 `asyncio.run(main())` 入口（`test_graph.py` 甚至在模块级直接执行），依赖 `DASHSCOPE_API_KEY` 与已启动的 Modbus 模拟器，**默认不会被 `uv run pytest` 收集**，需按下文单独运行。
 
 `pyproject.toml` 中已配置 `asyncio_mode = "auto"`、`pythonpath = ["src"]`、`testpaths = ["tests"]`，直接运行即可：
 
@@ -351,6 +478,13 @@ curl "http://localhost:8000/api/v1/closed-loop/history?limit=20"
 uv run pytest              # 运行全部测试
 uv run pytest -v           # 显示详细用例
 uv run pytest --cov=app    # 带覆盖率报告（pytest-cov）
+```
+
+Agent 侧脚本需手动执行（先启动 Modbus 模拟器，并保证 `src` 在模块路径中）：
+
+```powershell
+$env:PYTHONPATH = "src"
+uv run python src/app/agents/tests/test_check_approve_resume.py
 ```
 
 ## Docker 部署
@@ -402,6 +536,7 @@ curl "http://localhost:8000/api/v1/closed-loop/status"
 
 > `api` 与各模拟器之间通过 compose 网络直连，走容器**实际监听端口**；`ports` 映射仅用于宿主机访问。
 > 本地调试时，容器内访问宿主机上的模拟器可用 `host.docker.internal`。
+> `api` 服务目前**没有声明 `DASHSCOPE_API_KEY`**，要用 Agent 评审需自行补充（compose 的 `environment` 或 `.env` 注入），否则 LLM 调用失败。
 
 ## API 端点
 
@@ -412,6 +547,9 @@ curl "http://localhost:8000/api/v1/closed-loop/status"
 | GET | `/api/v1/sensor/temperature?line_id=line[1-9]` | 读取产线温度（line_id 需匹配 `line1`~`line9`） |
 | GET | `/api/v1/closed-loop/status` | 闭环最新判定结果（采集器未产出时返回提示消息） |
 | GET | `/api/v1/closed-loop/history?limit=20` | 最近 N 条闭环判定记录（最多 100 条） |
+| POST | `/api/v1/agent/review` | 启动文档评审，body `{document_text}`；返回 `thread_id` 与 `interrupts`（可能为空即已完成） |
+| POST | `/api/v1/agent/review/{thread_id}/resume` | 恢复中断，body `{action, edited_text?}`；`action` ∈ `approve` / `edit` / `reject` / `tool_allow` / `tool_deny`，`edit` 必须带 `edited_text` |
+| GET | `/api/v1/agent/review/{thread_id}/status` | 查询评审状态：`interrupted` / `completed`，`thread_id` 不存在时返回 404 |
 | GET | `/test/business-error` | 测试端点：触发业务异常（`DEVICE_OFFLINE`，503） |
 | GET | `/test/unknown-error` | 测试端点：触发未预期异常（`INTERNAL_ERROR`，500） |
 
@@ -436,6 +574,7 @@ curl "http://localhost:8000/api/v1/closed-loop/status"
 | `MQTT_BROKER` | `localhost` | MQTT Broker 地址 |
 | `MQTT_PORT` | `1883` | MQTT 端口 |
 | `MQTT_TOPIC_PREFIX` | `factory` | MQTT 主题前缀，实际主题为 `{prefix}/line1/{channel}` |
+| `DASHSCOPE_API_KEY` | 无（必填） | 阿里云百炼 API Key。由 `src/app/agents/llm.py` 用 `os.getenv` 直接读取，**不经过 `core/config.py` 的 settings 类**，缺失时 LLM 调用失败 |
 
 ## 路线图
 
@@ -443,5 +582,11 @@ curl "http://localhost:8000/api/v1/closed-loop/status"
 - [x] Docker 容器化（`Dockerfile` 多阶段构建 + `docker-compose.yml` 编排）
 - [x] OPC UA 客户端订阅与产线节点模拟服务器
 - [x] 闭环采集器与查询接口（采集 → 判定 → 线圈动作 → MQTT 输出）
+- [x] LangGraph 文档评审 Agent（`src/app/agents/`：检索 → 生成 → 工具 → 评估 → 人工审批）
+- [x] 工具级人工授权（`HumanInTheLoopMiddleware`，`trigger_alarm` 需审批）
+- [x] 评审接口与前端工作台对接（启动 / 恢复 / 状态查询，支持多轮中断）
 - [ ] 设备控制接口（`src/app/api/routes/device.py`，空文件）
 - [ ] 独立 MQTT 服务封装（`src/app/services/mqtt_service.py`，当前逻辑内联在 `collector.py`）
+- [ ] checkpointer 持久化（当前 `InMemorySaver`，进程重启丢失；规划换 `AsyncPostgresSaver` + `CHECKPOINT_DB_URI`）
+- [ ] 检索节点接入真实 RAG 知识库（`retrieve_node` 与 `query_equipment_manual` 目前为模拟数据）
+- [ ] 清理 `src/app/agents/agent.py` 遗留草稿路由
