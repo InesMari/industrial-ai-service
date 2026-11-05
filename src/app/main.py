@@ -17,6 +17,8 @@ from app.services.collector import ClosedLoopCollector
 from app.agents.graph import build_graph
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.services.vision_service import VisionService
+
 settings = get_settings()
 setup_logging(settings.APP_LOG_LEVEL)
 logging.getLogger("asyncua").setLevel(logging.WARNING)  #防止日志刷屏
@@ -125,6 +127,7 @@ def create_app() -> FastAPI:
     async def test_unknown_error():
         raise RuntimeError("这是一个未预期的异常")
 
+    app.state.vision = VisionService()
     app.include_router(api_router, prefix="/api/v1")
     return app
 

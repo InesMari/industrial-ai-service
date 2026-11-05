@@ -1,10 +1,81 @@
-# Python-generated files
+# ===== Python =====
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
 dist/
-wheels/
-*.egg-info
+*.egg-info/
+.eggs/
 
-# Virtual environments
-.venv
+# ===== uv / 虚拟环境 =====
+.venv/
+venv/
+env/
+uv.lock.bak
+
+# ===== 测试与工具缓存 =====
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.ipynb_checkpoints/
+
+# ===== 环境变量（敏感） =====
+.env
+.env.*
+!.env.example
+
+# ===== 日志 =====
+logs/
+*.log
+*.log.*
+
+# ===== 数据集（体积大，走外部下载） =====
+ml/
+NEU-DET/
+NEU-DET-yolo/
+datasets/
+data/
+*.zip
+*.tar.gz
+*.rar
+
+# ===== 模型权重（走 release / 云存储，不进 git） =====
+*.pt
+*.pth
+*.onnx
+*.engine
+*.ckpt
+*.safetensors
+weights/
+
+# ===== 训练与推理输出 =====
+runs/
+!runs/**/results.png
+!runs/**/confusion_matrix.png
+!runs/**/confusion_matrix_normalized.png
+
+# ===== 临时文件 / IDE =====
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.code-workspace
+
+# ===== Docker =====
+.docker/
+docker-compose.override.yml
+
+# ===== 数据库 / checkpoint =====
+*.db
+*.sqlite
+*.sqlite3
+checkpoints/

@@ -342,3 +342,36 @@ Traceback (most recent call last):
 KeyError: 'decisions'
 During task with name 'HumanInTheLoopMiddleware.after_model' and id 'a71fae83-56c9-0b0e-5773-eda3a84764d6'
 During task with name 'industrial_agent' and id 'e6fedba1-8d4b-d1c2-a6f7-637a1af8fb06'
+{"timestamp": "2026-11-05 01:28:39", "level": "INFO", "logger": "app.core.middleware", "message": "POST /api/v1/vision/neu-det/detect", "module": "middleware", "line": 14, "request_id": "5beefc42-964"}
+INFO:     127.0.0.1:52393 - "POST /api/v1/vision/neu-det/detect HTTP/1.1" 404 Not Found
+{"timestamp": "2026-11-05 01:34:52", "level": "INFO", "logger": "app.core.middleware", "message": "GET /docs", "module": "middleware", "line": 14, "request_id": "ba703d77-86e"}
+INFO:     127.0.0.1:52665 - "GET /docs HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 01:34:54", "level": "INFO", "logger": "app.core.middleware", "message": "GET /openapi.json", "module": "middleware", "line": 14, "request_id": "56a32915-419"}
+INFO:     127.0.0.1:52665 - "GET /openapi.json HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 01:35:20", "level": "INFO", "logger": "app.core.middleware", "message": "POST /api/v1/vision/neu-det/detect", "module": "middleware", "line": 14, "request_id": "56c5b159-487"}
+INFO:     127.0.0.1:52679 - "POST /api/v1/vision/neu-det/detect HTTP/1.1" 404 Not Found
+{"timestamp": "2026-11-05 15:03:41", "level": "INFO", "logger": "app.core.middleware", "message": "POST /api/v1/vision/neu-det/detect", "module": "middleware", "line": 14, "request_id": "83f15457-fe7"}
+INFO:     127.0.0.1:63734 - "POST /api/v1/vision/neu-det/detect HTTP/1.1" 404 Not Found
+{"timestamp": "2026-11-05 15:10:35", "level": "INFO", "logger": "app.core.middleware", "message": "GET /docs", "module": "middleware", "line": 14, "request_id": "46f4abed-b86"}
+INFO:     127.0.0.1:64776 - "GET /docs HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:10:35", "level": "INFO", "logger": "app.core.middleware", "message": "GET /openapi.json", "module": "middleware", "line": 14, "request_id": "9443736e-3bf"}
+INFO:     127.0.0.1:64776 - "GET /openapi.json HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:10:37", "level": "INFO", "logger": "app.core.middleware", "message": "GET /docs", "module": "middleware", "line": 14, "request_id": "88164abe-de5"}
+INFO:     127.0.0.1:64776 - "GET /docs HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:10:37", "level": "INFO", "logger": "app.core.middleware", "message": "GET /openapi.json", "module": "middleware", "line": 14, "request_id": "68d2fb5a-ec6"}
+INFO:     127.0.0.1:64776 - "GET /openapi.json HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:10:51", "level": "INFO", "logger": "app.core.middleware", "message": "GET /health", "module": "middleware", "line": 14, "request_id": "ef0a8b4b-889"}
+INFO:     127.0.0.1:64777 - "GET /health HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:10:51", "level": "INFO", "logger": "app.core.middleware", "message": "GET /favicon.ico", "module": "middleware", "line": 14, "request_id": "f5b918b4-3a9"}
+INFO:     127.0.0.1:64777 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+{"timestamp": "2026-11-05 15:39:12", "level": "INFO", "logger": "app.core.middleware", "message": "POST /api/v1/vision/neu-det/detect", "module": "middleware", "line": 14, "request_id": "220d2341-2df"}
+INFO:     127.0.0.1:49583 - "POST /api/v1/vision/neu-det/detect HTTP/1.1" 404 Not Found
+{"timestamp": "2026-11-05 15:39:18", "level": "INFO", "logger": "app.core.middleware", "message": "GET /docs", "module": "middleware", "line": 14, "request_id": "c962c3b0-75d"}
+INFO:     127.0.0.1:49590 - "GET /docs HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:39:18", "level": "INFO", "logger": "app.core.middleware", "message": "GET /openapi.json", "module": "middleware", "line": 14, "request_id": "f6712921-c1c"}
+INFO:     127.0.0.1:49590 - "GET /openapi.json HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:40:59", "level": "INFO", "logger": "app.core.middleware", "message": "GET /docs", "module": "middleware", "line": 14, "request_id": "a56e2fff-c30"}
+INFO:     127.0.0.1:49641 - "GET /docs HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:40:59", "level": "INFO", "logger": "app.core.middleware", "message": "GET /openapi.json", "module": "middleware", "line": 14, "request_id": "48ee10a7-941"}
+INFO:     127.0.0.1:49641 - "GET /openapi.json HTTP/1.1" 200 OK
+{"timestamp": "2026-11-05 15:45:49", "level": "WARNING", "logger": "pymodbus.logging", "message": "Failed to connect ", "module": "logging", "line": 109}

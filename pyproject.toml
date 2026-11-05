@@ -17,6 +17,8 @@ dependencies = [
     "pydantic>=2.14.0",
     "pydantic-settings>=2.15.0",
     "pymodbus==3.6.9",
+    "python-multipart>=0.0.33",
+    "ultralytics>=8.4.199",
     "uvicorn[standard]>=0.54.0",
 ]
 
