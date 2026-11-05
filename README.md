@@ -1,11 +1,12 @@
 # industrial-ai-service
 
-工业 AI 数据服务 —— 基于 FastAPI 的工业设备数据采集与闭环控制后端，内置基于 LangGraph 的文档评审 Agent。
+工业 AI 数据服务 —— 基于 FastAPI 的工业设备数据采集与闭环控制后端，内置基于 LangGraph 的文档评审 Agent 与基于 YOLOv8 的表面缺陷检测。
 
 - **采集**：通过 Modbus TCP 读取现场设备的温度、压力、振动，并通过 OPC UA 订阅产线节点变化
 - **闭环**：后台采集器按固定周期执行「触发 → 采集 → 判定 → 输出」，超阈值时自动写线圈（报警灯 / 冷却阀）并向 MQTT 发布告警
 - **评审**：LangGraph 文档评审 Agent 走「检索 → 生成 → 工具调用 → 质量评估 → 人工审批」链路，实时传感数据由工具读取，高危工具（`trigger_alarm`）与最终结论均需人工授权/审批后才落地
-- **对外**：统一的 HTTP API（最新状态、历史判定记录、Agent 评审的启动/恢复/状态查询）+ MQTT 遥测/告警主题，为上层 AI 分析与工业应用提供数据接入
+- **检测**：YOLOv8 钢材表面缺陷检测（NEU-DET 六类），multipart 上传图片返回缺陷类别、置信度与边框；另有 PatchCore 无监督异常检测实验（anomalib / MVTecAD，未接入 API）
+- **对外**：统一的 HTTP API（最新状态、历史判定记录、Agent 评审的启动/恢复/状态查询、缺陷检测）+ MQTT 遥测/告警主题，为上层 AI 分析与工业应用提供数据接入
 - **联调**：内置 Modbus TCP 与 OPC UA 模拟器，无需真实硬件即可完整跑通链路
 
 ## 技术栈
@@ -20,6 +21,9 @@
 | paho-mqtt | MQTT 发布：遥测 telemetry、告警 alarm、预警 warning |
 | LangChain / LangGraph | Agent 图编排（`StateGraph`、`create_agent`）、`HumanInTheLoopMiddleware` 工具级中断、checkpoint 暂停与恢复 |
 | qwen-plus（DashScope） | LLM，通过阿里云百炼的 OpenAI 兼容模式调用（`langchain-openai`） |
+| ultralytics | YOLOv8 缺陷检测：NEU-DET 训练与 `VisionService` 推理 |
+| anomalib | PatchCore 无监督异常检测实验（MVTecAD，尚未接入 API） |
+| python-multipart | FastAPI multipart 文件上传支持（视觉检测接口） |
 | uvicorn | ASGI 服务器 |
 | uv | 包管理与项目构建 |
 | Docker / Docker Compose | 容器化构建与一键编排（API + Modbus 模拟 + OPC UA 模拟 + Mosquitto） |
@@ -47,9 +51,10 @@ industrial-ai-service/
 │   │   │   │   ├── sensor.py        # 传感器数据接口：GET /api/v1/sensor/temperature
 │   │   │   │   ├── closed_loop.py   # 闭环接口：GET /api/v1/closed-loop/status、/history
 │   │   │   │   ├── agent.py         # 评审接口：POST /agent/review、/resume，GET /agent/review/{thread_id}/status
+│   │   │   │   ├── vision.py        # 视觉接口：POST /vision/neu-det/detect（multipart 上传）
 │   │   │   │   ├── health.py        # 健康检查：GET /api/v1/health
 │   │   │   │   └── device.py        # 设备控制接口（空文件，规划中）
-│   │   │   └── router.py            # 路由汇总，挂载 sensor / health / closed_loop / agent
+│   │   │   └── router.py            # 路由汇总，挂载 sensor / health / closed_loop / agent / vision
 │   │   ├── core/
 │   │   │   ├── config.py            # 配置管理：pydantic-settings 加载 .env，lru_cache 单例
 │   │   │   ├── logging.py           # 日志配置：JSON 结构化日志，附带 request_id 与异常信息
@@ -64,12 +69,19 @@ industrial-ai-service/
 │   │   │   ├── collector.py         # 闭环采集器 ClosedLoopCollector：采集 → 判定 → 输出
 │   │   │   ├── opcua_service.py     # OPC UA 客户端：连接、订阅节点变化、读值
 │   │   │   ├── verify_opcua_subscribe.py  # 独立脚本：验证 OPC UA 订阅是否收到变化
-│   │   │   └── mqtt_service.py      # MQTT 发布逻辑（空文件，规划中）
+│   │   │   ├── mqtt_service.py      # MQTT 发布逻辑（空文件，规划中）
+│   │   │   └── vision_service.py    # VisionService：YOLOv8 加载与 detect() 推理（class / confidence / bbox）
 │   │   ├── dependencies/
 │   │   │   └── providers.py         # 依赖注入提供者：get_modbus_service() 单例工厂
 │   │   ├── simulators/
 │   │   │   ├── modbus_simulator.py  # Modbus TCP 从站模拟器（数值自动变化）
 │   │   │   └── opcua_server.py      # OPC UA 服务器模拟器（产线节点树）
+│   │   ├── vision/
+│   │   │   ├── neu_det_data.yaml    # NEU-DET 数据集配置（6 类缺陷，path 为绝对路径指向 ml/NEU-DET-yolo）
+│   │   │   ├── neu_det_xml2yolo.py  # VOC XML → YOLO TXT 转换 + 训练/验证集划分
+│   │   │   ├── train_neu_det.py     # YOLOv8n 训练脚本（CPU），产物 runs/detect/neu_det/weights/best.pt
+│   │   │   ├── train_patchcore.py   # PatchCore 异常检测实验（anomalib / MVTecAD，未提交、未接入 API）
+│   │   │   └── print_ultralytics.py # 打印 ultralytics 版本/环境的小工具
 │   │   └── main.py                  # 应用工厂入口：create_app()、lifespan、统一异常处理器
 │   └── industrial_ai_service/       # uv 构建的包入口（industrial-ai-service 命令）
 ├── tests/
@@ -77,6 +89,7 @@ industrial-ai-service/
 │   ├── test_sensor.py               # 传感器接口测试：正常读取、参数校验、设备离线等用例
 │   └── test_closed_loop.py          # 闭环测试：FakeModbus / FakeOpcUa 下的判定与线圈动作
 ├── front/                           # 前端工程（Vue 3 + Vite + Element Plus，详见 front/README.md）
+├── download_MVTecAD.py              # 实验脚本：下载 MVTecAD 数据集（anomalib，见下文）
 ├── modbus_sim.py                    # 遗留脚本：早期 Modbus 模拟器（见下文）
 ├── write_register.py                # 遗留脚本：向模拟器寄存器写入值（见下文）
 ├── Dockerfile                       # 多阶段构建镜像：uv 构建依赖 + 非 root 用户运行
@@ -273,6 +286,41 @@ flowchart LR
 - checkpointer 决定中断状态能否持久化：`lifespan` 注入 `InMemorySaver()`（进程重启即丢失），生产可换 `AsyncPostgresSaver`
 - `src/app/agents/agent.py` 是早期草稿路由，未被 `router.py` 引用，**不是有效接口**
 
+### 视觉缺陷检测（YOLOv8）
+
+`src/app/services/vision_service.py` 提供 `VisionService`，对上传图片做 NEU-DET 钢材表面缺陷检测：
+
+**推理链路**：`POST /api/v1/vision/neu-det/detect` 接收 multipart 图片 → `VisionService.detect()`（`cv2.imdecode` 解码 + YOLO 推理，默认 `conf=0.25`）→ 返回 `{defect_count, detections[]}`，每个检测项为：
+
+```json
+{ "class": "scratches", "confidence": 0.873, "bbox": [12.5, 30.1, 180.0, 96.4] }
+```
+
+**挂载与启动前置条件**：`create_app()` 中 `app.state.vision = VisionService()`，构造时即加载默认权重 `runs/detect/neu_det/weights/best.pt`（相对启动目录）。**权重文件不存在时应用会直接启动失败**——首次运行需先完成下面的训练，或临时移除该挂载。
+
+**NEU-DET 六类缺陷**：`crazing`（龟裂）、`inclusion`（夹杂）、`patches`（斑块）、`pitted_surface`（点蚀表面）、`rolled-in_scale`（氧化皮压入）、`scratches`（划痕）。
+
+**训练流水线**（离线脚本，产出推理权重）：
+
+```powershell
+# 1. 数据集准备：NEU-DET 原始数据放到 ml/NEU-DET/{IMAGES,ANNOTATIONS}
+#    VOC XML → YOLO TXT 转换 + 训练/验证集划分（val 20%，seed=42），输出 ml/NEU-DET-yolo/
+uv run python src/app/vision/neu_det_xml2yolo.py
+
+# 2. 训练：yolov8n 预训练权重起步，epochs=50、imgsz=320、batch=16、device=cpu、workers=0
+uv run python src/app/vision/train_neu_det.py
+
+# 3. 产物落在 runs/detect/neu_det/weights/best.pt，服务启动时自动加载
+```
+
+> `src/app/vision/neu_det_data.yaml` 中的 `path` 是**绝对路径**（`E:/IndustryAI/industrial-ai-service/ml/NEU-DET-yolo`），换机器或换目录需同步修改。
+
+**PatchCore 无监督异常检测（实验性，未提交、未接入 API）**：
+
+- `download_MVTecAD.py`：`anomalib.data.MVTecAD(root="./datasets/MVTecAD", category="transistor")` + `prepare_data()` 触发数据集下载
+- `src/app/vision/train_patchcore.py`：`Patchcore(backbone="wide_resnet50_2", layers=["layer2", "layer3"], coreset_sampling_ratio=0.1)`，`Engine().fit/test`；脚本内置 `HF_ENDPOINT=https://hf-mirror.com` 镜像与 `HF_HOME` 缓存目录，`num_workers=0`（Windows）
+- 训练输出在 `results/Patchcore/MVTecAD/transistor/`；后续计划封装为检测服务
+
 ## 本地模拟器
 
 在没有真实 PLC/传感器的环境下，使用 `src/app/simulators/` 下的两个模拟器进行联调。
@@ -372,6 +420,8 @@ uv run python -m app.simulators.opcua_server
 uv run uvicorn app.main:app --reload --app-dir src
 ```
 
+> 启动时会加载视觉检测权重（`app.state.vision = VisionService()`），若 `runs/detect/neu_det/weights/best.pt` 不存在会**直接启动失败**。首次运行请先完成「视觉缺陷检测（YOLOv8）」小节的训练，或临时移除该挂载。
+
 服务默认监听 `http://localhost:8000`，交互式 API 文档位于 `http://localhost:8000/docs`。
 
 ### 5. 验证
@@ -459,6 +509,12 @@ Agent 通常在工具授权或评审审批处中断，响应形如：
 curl -X POST "http://localhost:8000/api/v1/agent/review/review_1a2b3c4d5e6f/resume" `
   -H "Content-Type: application/json" `
   -d '{"action":"tool_allow"}'
+```
+
+检测图片缺陷（`file` 替换为本地图片路径，需已存在 `runs/detect/neu_det/weights/best.pt`）：
+
+```powershell
+curl -X POST "http://localhost:8000/api/v1/vision/neu-det/detect" -F "file=@your_image.jpg"
 ```
 
 ## 运行测试
@@ -550,6 +606,7 @@ curl "http://localhost:8000/api/v1/closed-loop/status"
 | POST | `/api/v1/agent/review` | 启动文档评审，body `{document_text}`；返回 `thread_id` 与 `interrupts`（可能为空即已完成） |
 | POST | `/api/v1/agent/review/{thread_id}/resume` | 恢复中断，body `{action, edited_text?}`；`action` ∈ `approve` / `edit` / `reject` / `tool_allow` / `tool_deny`，`edit` 必须带 `edited_text` |
 | GET | `/api/v1/agent/review/{thread_id}/status` | 查询评审状态：`interrupted` / `completed`，`thread_id` 不存在时返回 404 |
+| POST | `/api/v1/vision/neu-det/detect` | 上传图片（multipart 字段 `file`）做 NEU-DET 缺陷检测，返回 `{defect_count, detections[]}` |
 | GET | `/test/business-error` | 测试端点：触发业务异常（`DEVICE_OFFLINE`，503） |
 | GET | `/test/unknown-error` | 测试端点：触发未预期异常（`INTERNAL_ERROR`，500） |
 
@@ -585,6 +642,9 @@ curl "http://localhost:8000/api/v1/closed-loop/status"
 - [x] LangGraph 文档评审 Agent（`src/app/agents/`：检索 → 生成 → 工具 → 评估 → 人工审批）
 - [x] 工具级人工授权（`HumanInTheLoopMiddleware`，`trigger_alarm` 需审批）
 - [x] 评审接口与前端工作台对接（启动 / 恢复 / 状态查询，支持多轮中断）
+- [x] YOLOv8 表面缺陷检测（NEU-DET 六类：数据转换 → CPU 训练 → 检测接口）
+- [ ] PatchCore 异常检测服务化（`src/app/vision/train_patchcore.py` 实验已跑通，未封装 API）
+- [ ] 视觉配置化：权重路径与置信度阈值可配置（当前写死 `runs/detect/neu_det/weights/best.pt`、`conf=0.25`）
 - [ ] 设备控制接口（`src/app/api/routes/device.py`，空文件）
 - [ ] 独立 MQTT 服务封装（`src/app/services/mqtt_service.py`，当前逻辑内联在 `collector.py`）
 - [ ] checkpointer 持久化（当前 `InMemorySaver`，进程重启丢失；规划换 `AsyncPostgresSaver` + `CHECKPOINT_DB_URI`）

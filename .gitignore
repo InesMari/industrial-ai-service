@@ -9,73 +9,75 @@ dist/
 *.egg-info/
 .eggs/
 
-# ===== uv / 虚拟环境 =====
+# ===== 虚拟环境 =====
 .venv/
 venv/
 env/
-uv.lock.bak
 
-# ===== 测试与工具缓存 =====
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.ipynb_checkpoints/
-
-# ===== 环境变量（敏感） =====
+# ===== 环境变量与密钥 =====
 .env
-.env.*
-!.env.example
+.env.local
+.env.*.local
+*.pem
+*.key
 
 # ===== 日志 =====
 logs/
 *.log
 *.log.*
 
-# ===== 数据集（体积大，走外部下载） =====
-ml/
-NEU-DET/
-NEU-DET-yolo/
-datasets/
-data/
-*.zip
-*.tar.gz
-*.rar
+# ===== 测试与覆盖率 =====
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
 
-# ===== 模型权重（走 release / 云存储，不进 git） =====
-*.pt
-*.pth
-*.onnx
-*.engine
-*.ckpt
-*.safetensors
-weights/
-
-# ===== 训练与推理输出 =====
-runs/
-!runs/**/results.png
-!runs/**/confusion_matrix.png
-!runs/**/confusion_matrix_normalized.png
-
-# ===== 临时文件 / IDE =====
-*.tmp
-*.bak
-*.swp
-.DS_Store
-Thumbs.db
+# ===== IDE / 编辑器 =====
 .vscode/
 .idea/
-*.code-workspace
+*.swp
+*.swo
+*~
 
-# ===== Docker =====
-.docker/
-docker-compose.override.yml
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# ===== 数据库 / checkpoint =====
-*.db
-*.sqlite
+# ===== 临时文件 =====
+*.tmp
+*.bak
+*.orig
+
+# ===== 模型权重 =====
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.bin
+*.h5
+
+# ===== YOLO 训练产物 =====
+runs/
+*.cache
+
+# ===== Anomalib 训练产物 =====
+results/
+
+# ===== 数据集（体积大，不入库） =====
+datasets/
+NEU-DET/
+NEU-DET-yolo/
+
+# ===== Hugging Face / timm 本地缓存（如果放在项目内） =====
+.cache/
+hf_cache/
+
+# ===== 其他 =====
 *.sqlite3
-checkpoints/
+*.db
+node_modules/
