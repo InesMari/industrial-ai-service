@@ -71,6 +71,7 @@ class ClosedLoopCollector:
         else:
             raise RuntimeError(f"OPC UA 连接失败，已重试 10 次: {last_error}")
 
+        #建立订阅
         await self.opcua.subscribe(
             ["ProductionLine/Temperature", "ProductionLine/Vibration"],
             on_change=self._on_opcua_change,

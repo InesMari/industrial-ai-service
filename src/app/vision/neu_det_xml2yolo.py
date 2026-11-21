@@ -22,12 +22,12 @@ XML_DIR = os.path.join(RAW_DIR, "ANNOTATIONS")
 
 # 类别映射：必须和 data.yaml 里的 names 顺序完全一致
 CLASSES = [
-    "crazing",           # 0
-    "inclusion",         # 1
-    "patches",           # 2
-    "pitted_surface",    # 3
-    "rolled-in_scale",   # 4
-    "scratches",         # 5
+    "crazing",           # 0    龟裂：细密网状微裂纹，低对比度，最难检
+    "inclusion",         # 1    夹杂物：条状/点状暗色非金属杂质
+    "patches",           # 2    斑块：大面积明暗不均，最易检
+    "pitted_surface",    # 3    点蚀麻面：密集微小凹坑
+    "rolled-in_scale",   # 4    轧入氧化皮：压入表面的氧化皮，易与龟裂混淆
+    "scratches",         # 5    划痕：细长线性刮痕，方向多变
 ]
 CLASS_TO_ID = {name: i for i, name in enumerate(CLASSES)}
 

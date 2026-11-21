@@ -3,9 +3,9 @@ train: images/train
 val: images/val
 
 names:
-  0: crazing
-  1: inclusion
-  2: patches
-  3: pitted_surface
-  4: rolled-in_scale
-  5: scratches
+  0: crazing          # 龟裂：细密网状微裂纹，低对比度，最难检
+  1: inclusion        # 夹杂物：条状/点状暗色非金属杂质
+  2: patches          # 斑块：大面积明暗不均，最易检
+  3: pitted_surface   # 点蚀麻面：密集微小凹坑
+  4: rolled-in_scale  # 轧入氧化皮：压入表面的氧化皮，易与龟裂混淆
+  5: scratches        # 划痕：细长线性刮痕，方向多变

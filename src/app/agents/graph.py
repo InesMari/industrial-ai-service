@@ -53,7 +53,7 @@ async def extract_draft_node(state: ReviewState) -> dict:
     return {"draft_review": ""}
 
 
-def build_graph(checkpointer):
+def build_graph(checkpointer = None):
     builder = StateGraph(ReviewState)
     if not checkpointer:
         checkpointer = InMemorySaver()
@@ -62,7 +62,7 @@ def build_graph(checkpointer):
     builder.add_node("retrieve", retrieve_node)
     builder.add_node("generate", generate_node)
     builder.add_node("industrial_agent", build_industrial_agent(checkpointer))
-    builder.add_node("extract_draft", extract_draft_node)   # 新增
+    builder.add_node("extract_draft", extract_draft_node)
     builder.add_node("evaluate", evaluate_node)
     builder.add_node("revise", revise_node)
     builder.add_node("human_review", human_review_node)

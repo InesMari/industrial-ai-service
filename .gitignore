@@ -81,3 +81,4 @@ hf_cache/
 *.sqlite3
 *.db
 node_modules/
+.codebuddy

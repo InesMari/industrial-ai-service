@@ -32,23 +32,23 @@ async def lifespan(app: FastAPI):
     await modbus.connect()
 
     # 创建 OPC UA 客户端
-    # opcua = OpcUaService(
-    #     url=f"opc.tcp://{settings.OPCUA_HOST}:{settings.OPCUA_PORT}"
-    #         f"/freeopcua/server/",
-    #     ns_uri=settings.OPCUA_NS_URI,
-    # )
+    opcua = OpcUaService(
+        url=f"opc.tcp://{settings.OPCUA_HOST}:{settings.OPCUA_PORT}"
+            f"/freeopcua/server/",
+        ns_uri=settings.OPCUA_NS_URI,
+    )
 
     # # 创建并启动闭环采集器
-    # collector = ClosedLoopCollector(
-    #     modbus=modbus,
-    #     opcua=opcua,
-    #     mqtt_broker=settings.MQTT_BROKER,
-    #     mqtt_port=settings.MQTT_PORT,
-    #     mqtt_prefix=settings.MQTT_TOPIC_PREFIX,
-    #     interval=2.0,
-    # )
-    # await collector.start()
-    # app.state.collector = collector
+    collector = ClosedLoopCollector(
+        modbus=modbus,
+        opcua=opcua,
+        mqtt_broker=settings.MQTT_BROKER,
+        mqtt_port=settings.MQTT_PORT,
+        mqtt_prefix=settings.MQTT_TOPIC_PREFIX,
+        interval=2.0,
+    )
+    await collector.start()
+    app.state.collector = collector
 
     # 开发阶段：InMemorySaver，进程重启即丢失，仅用于联调
     checkpointer = InMemorySaver()
@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("服务器正在关闭......")
-    # await collector.stop()
+    await collector.stop()
     await modbus.disconnect()
     logger.info("服务器已关闭")
 
